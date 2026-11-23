@@ -10,7 +10,7 @@
     <meta name="description" content="Doctor Payment Reconciliation and Cashier Balance Management System - Live Online Cloud Sync.">
     <meta name="keywords" content="doctor payment reconciliation, arogya health system, echannelling cashier report, hospital cash management, medical accounting">
     <title>Doctor Payment Reconciliation System</title>
-    <!-- V5.8: Remove the Doctor Reconciliation Sheet Other Payment amount-entry row and its deduction. -->
+    <!-- V5.12: Cashier Float uses the same admin delete icon style as Doctor Sheet dynamic fields; restore remains available. -->
     <!-- Dynamic PWA Manifest & Offline App Setup -->
     <script>
         (function() {
@@ -527,6 +527,10 @@
                                     setCustomDocFields(cloudData.customDocFields);
                                     localStorage.setItem('app_custom_doc_fields', JSON.stringify(cloudData.customDocFields));
                                 }
+                                if (cloudData.docCashierFloatVisible !== undefined) {
+                                    setDocCashierFloatVisible(!!cloudData.docCashierFloatVisible);
+                                    localStorage.setItem('app_doc_cashier_float_visible', String(!!cloudData.docCashierFloatVisible));
+                                }
                                 if (cloudData.historyLogs && Array.isArray(cloudData.historyLogs)) {
                                     setHistoryLogs(cloudData.historyLogs);
                                     localStorage.setItem('app_history_logs', JSON.stringify(cloudData.historyLogs));
@@ -561,6 +565,7 @@
                                     users,
                                     systemModules,
                                     customDocFields,
+                                    docCashierFloatVisible,
                                     historyLogs,
                                     pettyVouchers,
                                     pettyDailyFloats,
@@ -606,6 +611,7 @@
                         users,
                         systemModules,
                         customDocFields,
+                        docCashierFloatVisible,
                         historyLogs,
                         pettyVouchers,
                         pettyDailyFloats,
@@ -904,6 +910,9 @@
 
             const [docCashFloat, setDocCashFloat] = useState('');
             const [docCashierFloat, setDocCashierFloat] = useState('');
+            const [docCashierFloatVisible, setDocCashierFloatVisible] = useState(() => {
+                try { return localStorage.getItem('app_doc_cashier_float_visible') !== 'false'; } catch { return true; }
+            });
 
             const [extraCollections, setExtraCollections] = useState([]);
             const [extraCashier, setExtraCashier] = useState('');
@@ -1064,7 +1073,20 @@
             const [cbDenoms, setCbDenoms] = useState({ 5000: '', 2000: '', 1000: '', 500: '', 100: '', 50: '', 20: '', 10: '', 5: '', 2: '', 1: '' });
 
             const totalPettyCashAmount = useMemo(() => filteredPettyVouchers.reduce((sum, v) => sum + (Number(v.amount) || 0), 0), [filteredPettyVouchers]);
-            const remainingPettyBalance = useMemo(() => ((parseFloat(currentPettyOpenAmount) || 0) + (Number(pettyActiveSession?.cashAdded ?? loadedPettySessionReport?.cashAdded) || 0)) - totalPettyCashAmount, [currentPettyOpenAmount, pettyActiveSession, loadedPettySessionReport, totalPettyCashAmount]);
+            // Use the active session's own opening amount as the source of truth.
+            // Ending a session resets the daily float to zero; reopening must not use
+            // that reset float, or vouchers will be subtracted from zero instead.
+            // Manual edits update pettyActiveSession.openingAmount, so they are honored
+            // automatically without requiring an edit to trigger voucher deduction.
+            const remainingPettyBalance = useMemo(() => {
+                const openingAmount = pettyActiveSession
+                    ? (Number(pettyActiveSession.openingAmount) || 0)
+                    : loadedPettySessionReport
+                        ? (Number(loadedPettySessionReport.openingAmount) || 0)
+                        : (parseFloat(currentPettyOpenAmount) || 0);
+                const cashAdded = Number(pettyActiveSession?.cashAdded ?? loadedPettySessionReport?.cashAdded) || 0;
+                return openingAmount + cashAdded - totalPettyCashAmount;
+            }, [currentPettyOpenAmount, pettyActiveSession, loadedPettySessionReport, totalPettyCashAmount]);
             const totalExtraCollections = useMemo(() => extraCollections.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [extraCollections]);
             const docTotalExpected = useMemo(() => {
                 let inflows = (parseFloat(docCashFloat) || 0) + totalExtraCollections;
@@ -1078,9 +1100,9 @@
                 });
 
                 inflows += customInflowSum;
-                const outflows = customOutflowSum + (parseFloat(docCashierFloat) || 0);
+                const outflows = customOutflowSum + (docCashierFloatVisible ? (parseFloat(docCashierFloat) || 0) : 0);
                 return inflows - outflows;
-            }, [docCashFloat, totalExtraCollections, customDocFields, customDocValues, docCashierFloat]);
+            }, [docCashFloat, totalExtraCollections, customDocFields, customDocValues, docCashierFloat, docCashierFloatVisible]);
 
             const docTotalDenom = useMemo(() => DENOMINATIONS.reduce((sum, d) => sum + (d.value * (parseInt(docDenoms[d.value], 10) || 0)), 0), [docDenoms]);
             const docShortOrExcess = useMemo(() => docTotalDenom - docTotalExpected, [docTotalDenom, docTotalExpected]);
@@ -1278,10 +1300,12 @@
                                             <td style="padding: 5px 10px; text-align: right; font-family: monospace; font-weight: 900;">${parseFloat(customDocValues[f.id] || 0).toFixed(2)}</td>
                                         </tr>
                                     `).join('')}
-                                    <tr style="border-bottom: 1px solid #000000; background: #ffffff;">
-                                        <td style="padding: 6px 10px; font-weight: 800;">${t.cashierFloat}</td>
-                                        <td style="padding: 6px 10px; text-align: right; font-family: monospace; font-weight: 900;">${parseFloat(docCashierFloat || 0).toFixed(2)}</td>
-                                    </tr>
+                                    ${docCashierFloatVisible ? `
+                                        <tr style="border-bottom: 1px solid #000000; background: #ffffff;">
+                                            <td style="padding: 6px 10px; font-weight: 800;">${t.cashierFloat}</td>
+                                            <td style="padding: 6px 10px; text-align: right; font-family: monospace; font-weight: 900;">${parseFloat(docCashierFloat || 0).toFixed(2)}</td>
+                                        </tr>
+                                    ` : ''}
                                     <tr class="print-total-row" style="background: #e2e8f0; color: #000000; font-weight: 900; border-top: 2.5px solid #000000;">
                                         <td style="padding: 8px 10px; font-size: 12px; text-transform: uppercase; color: #000000;">${t.expectedTotalBalance}</td>
                                         <td style="padding: 8px 10px; text-align: right; font-family: monospace; font-size: 13px; color: #000000;">Rs. ${docTotalExpected.toFixed(2)}</td>
@@ -1404,6 +1428,17 @@
                                             <td style="padding: 5px 6px; text-align: center;">-</td>
                                         </tr>
                                     `).join('')}
+                                    ${customDocFields.filter(field => field.sheet === 'cashierSheet').map(field => {
+                                        const fieldAmount = Number(customDocValues[field.id]) || 0;
+                                        const direction = field.type === 'inflow' ? '+' : '−';
+                                        return `
+                                            <tr style="border-bottom: 1px solid #000000; background: #ffffff;">
+                                                <td style="padding: 5px 10px; font-weight: 800;">${field.name} (${field.type === 'inflow' ? 'Add' : 'Deduct'})</td>
+                                                <td style="padding: 5px 6px; text-align: center; font-family: monospace; font-weight: 900;">${direction} ${fieldAmount.toFixed(2)}</td>
+                                                <td style="padding: 5px 6px; text-align: center;">-</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
                                     <tr class="print-total-row" style="background: #e2e8f0; color: #000000; font-weight: 900; border-top: 2.5px solid #000000;">
                                         <td style="padding: 8px 10px; font-size: 11px; text-transform: uppercase; color: #000000;">${t.netExpectedCash}</td>
                                         <td style="padding: 8px 6px; text-align: center; font-family: monospace; font-size: 12px; color: #000000;">${cbTotalCashExpected.toFixed(2)}</td>
@@ -1673,8 +1708,13 @@
             };
 
             const handleSavePettyOpeningAmount = () => {
-                const value = Number(pettyOpenAmount);
-                if (!pettyActiveSession || !Number.isFinite(value) || value < 0) return showToast('Enter a valid opening amount.', 'error');
+                const displayedTotal = Number(pettyOpenAmount);
+                const alreadyAdded = Number(pettyActiveSession?.cashAdded) || 0;
+                if (!pettyActiveSession || !Number.isFinite(displayedTotal) || displayedTotal < alreadyAdded) return showToast('Enter a valid total opening amount (not less than cash already added).', 'error');
+                // The input shows Opening + Added Cash as one total. Keep cashAdded
+                // separately for the session report, and store the adjusted base so
+                // the balance formula never counts added cash twice.
+                const value = displayedTotal - alreadyAdded;
                 const updated = { ...pettyActiveSession, openingAmount: value, openingAmountEditedAt: new Date().toLocaleString(), openingAmountEditedBy: currentUserProfile?.name || 'Admin' };
                 setPettyActiveSession(updated); persistPettySession(updated); setPettyOpeningEditMode(false);
                 showToast('Opening amount updated for this session.');
@@ -2972,10 +3012,23 @@
                                                     </tr>
                                                 ))}
 
-                                                <tr>
-                                                    <td className="p-2 font-semibold">{t.cashierFloat}</td>
-                                                    <td className="p-1"><input type="number" step="0.01" value={docCashierFloat} onFocus={handleInputFocus} onKeyDown={handleKeyDownNavigation} onBlur={e => formatCurrencyBlur(e.target.value, setDocCashierFloat)} onChange={e => setDocCashierFloat(e.target.value)} className="w-full border rounded px-2 py-1 text-center font-mono" /></td>
-                                                </tr>
+                                                {docCashierFloatVisible ? (
+                                                    <tr>
+                                                        <td className="p-2 font-semibold flex justify-between items-center">
+                                                            <span>{t.cashierFloat}</span>
+                                                            {currentUserProfile?.permissions?.admin && (
+                                                                <button type="button" onClick={() => { if (window.confirm('Remove Cashier Float from Doctor Reconciliation Sheet?')) { setDocCashierFloatVisible(false); localStorage.setItem('app_doc_cashier_float_visible', 'false'); syncToCloud({ docCashierFloatVisible: false }); } }} className="p-1 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors border border-rose-200 flex items-center justify-center" title={t.delete}>
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                                                    </svg>
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-1"><input type="number" step="0.01" value={docCashierFloat} onFocus={handleInputFocus} onKeyDown={handleKeyDownNavigation} onBlur={e => formatCurrencyBlur(e.target.value, setDocCashierFloat)} onChange={e => setDocCashierFloat(e.target.value)} className="w-full border rounded px-2 py-1 text-center font-mono" /></td>
+                                                    </tr>
+                                                ) : currentUserProfile?.permissions?.admin ? (
+                                                    <tr><td colSpan={2} className="p-2 text-center"><button type="button" onClick={() => { setDocCashierFloatVisible(true); localStorage.setItem('app_doc_cashier_float_visible', 'true'); syncToCloud({ docCashierFloatVisible: true }); }} className="px-3 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">Restore Cashier Field</button></td></tr>
+                                                ) : null}
                                                 <tr className="bg-sky-500/10 font-bold">
                                                     <td className="p-3 text-sky-600 uppercase">{t.expectedTotalBalance}</td>
                                                     <td className="p-3 text-center font-mono text-sm text-sky-600">Rs. {docTotalExpected.toFixed(2)}</td>
@@ -3237,7 +3290,7 @@
                                             step="0.01" 
                                             placeholder="0.00" 
                                             readOnly={pettyDateFrom !== pettyDateTo || (!!pettyActiveSession && !pettyOpeningEditMode)}
-                                            value={pettyActiveSession ? (pettyOpeningEditMode ? pettyOpenAmount : pettyActiveSession.openingAmount) : (pettyDateFrom === pettyDateTo ? currentPettyOpenAmount : Number(currentPettyOpenAmount).toFixed(2))} 
+                                            value={pettyActiveSession ? (pettyOpeningEditMode ? pettyOpenAmount : ((Number(pettyActiveSession.openingAmount) || 0) + (Number(pettyActiveSession.cashAdded) || 0))) : (pettyDateFrom === pettyDateTo ? currentPettyOpenAmount : Number(currentPettyOpenAmount).toFixed(2))} 
                                             onFocus={handleInputFocus} 
                                             onBlur={e => {
                                                 if (!pettyActiveSession && pettyDateFrom === pettyDateTo && e.target.value !== '' && !isNaN(e.target.value)) {
@@ -3261,7 +3314,7 @@
                                             }} 
                                             className={`w-full ${pettyDateFrom !== pettyDateTo || (!!pettyActiveSession && !pettyOpeningEditMode) ? 'bg-slate-200 cursor-not-allowed' : theme.cardBg} border-2 border-amber-400 rounded-xl px-3 py-2 font-mono text-base font-black text-black text-center shadow-sm`} 
                                         />
-                                        {pettyActiveSession && <div className="flex gap-2 mt-2">{!pettyOpeningEditMode ? <button type="button" onClick={() => { setPettyOpenAmount(String(pettyActiveSession.openingAmount ?? 0)); setPettyOpeningEditMode(true); }} className="flex-1 rounded-lg bg-amber-600 text-white text-xs font-bold py-2">✏️ Edit Opening Amount</button> : <><button type="button" onClick={handleSavePettyOpeningAmount} className="flex-1 rounded-lg bg-emerald-600 text-white text-xs font-bold py-2">Save Amount</button><button type="button" onClick={() => setPettyOpeningEditMode(false)} className="rounded-lg bg-slate-600 text-white text-xs font-bold px-3 py-2">Cancel</button></>}</div>}
+                                        {pettyActiveSession && <div className="flex gap-2 mt-2">{!pettyOpeningEditMode ? <button type="button" onClick={() => { setPettyOpenAmount(String((Number(pettyActiveSession.openingAmount) || 0) + (Number(pettyActiveSession.cashAdded) || 0))); setPettyOpeningEditMode(true); }} className="flex-1 rounded-lg bg-amber-600 text-white text-xs font-bold py-2">✏️ Edit Opening Amount</button> : <><button type="button" onClick={handleSavePettyOpeningAmount} className="flex-1 rounded-lg bg-emerald-600 text-white text-xs font-bold py-2">Save Amount</button><button type="button" onClick={() => setPettyOpeningEditMode(false)} className="rounded-lg bg-slate-600 text-white text-xs font-bold px-3 py-2">Cancel</button></>}</div>}
                                     </div>
                                     <div className={`p-4 rounded-2xl border ${theme.cardBorder} ${theme.inputBg} flex flex-col justify-center items-center`}>
                                         <span className="text-xs font-extrabold text-rose-500 uppercase">📉 Vouchers Paid ({pettyDateFrom === pettyDateTo ? pettyDateFrom : `${pettyDateFrom} - ${pettyDateTo}`})</span>
@@ -3279,7 +3332,7 @@
                                         {!pettyActiveSession ? <button onClick={handleStartPettySession} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-extrabold">▶ Start Session</button> : <button onClick={handleEndPettySession} className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-extrabold">■ End Session & Save Report</button>}
                                     </div>
                                     {pettyActiveSession && <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-                                        <div className="rounded-xl bg-white/80 border p-3"><div className="font-bold text-slate-500">Opening Amount</div><div className="font-mono font-black text-base">Rs. {Number(pettyActiveSession.openingAmount || 0).toFixed(2)}</div></div>
+                                        <div className="rounded-xl bg-white/80 border p-3"><div className="font-bold text-slate-500">Opening Amount</div><div className="font-mono font-black text-base">Rs. {(Number(pettyActiveSession.openingAmount || 0) + Number(pettyActiveSession.cashAdded || 0)).toFixed(2)}</div></div>
                                         <div className="rounded-xl bg-white/80 border p-3"><div className="font-bold text-slate-500">Cash Added</div><div className="font-mono font-black text-base">Rs. {Number(pettyActiveSession.cashAdded || 0).toFixed(2)}</div></div>
                                         <div className="flex gap-1"><input type="number" min="0.01" step="0.01" value={pettyCashAddInput} onChange={e => setPettyCashAddInput(e.target.value)} placeholder="Add cash Rs." className="w-full min-w-0 border rounded-xl px-2 text-black font-bold"/><button onClick={handleAddPettyCashToSession} className="px-3 rounded-xl bg-sky-600 text-white font-bold">+ Cash</button></div>
                                         <div className="flex gap-1"><input type="number" step="0.01" value={pettyCountedCashInput} onChange={e => setPettyCountedCashInput(e.target.value)} placeholder="Counted closing Rs." className="w-full min-w-0 border rounded-xl px-2 text-black font-bold"/></div>
